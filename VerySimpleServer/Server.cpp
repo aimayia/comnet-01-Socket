@@ -1,159 +1,230 @@
-#pragma once
-#include "winsock2.h"
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+
 #include <stdio.h>
 #include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <map>
+#include <cstring>
+#include <algorithm>
+
 using namespace std;
 
 #pragma comment(lib,"ws2_32.lib")
 
+static string getIniString(const char* file, const char* section, const char* key, const char* def) {
+    char buf[512] = {0};
+    GetPrivateProfileStringA(section, key, def, buf, sizeof(buf), file);
+    return string(buf);
+}
+
+static string contentTypeByExt(const string& path) {
+    size_t p = path.find_last_of('.');
+    if (p==string::npos) return "application/octet-stream";
+    string ext = path.substr(p+1);
+    if(ext=="htm"||ext=="html") return "text/html; charset=utf-8";
+    if(ext=="css") return "text/css";
+    if(ext=="js") return "application/javascript";
+    if(ext=="png") return "image/png";
+    if(ext=="jpg"||ext=="jpeg") return "image/jpeg";
+    if(ext=="gif") return "image/gif";
+    if(ext=="txt") return "text/plain; charset=utf-8";
+    return "application/octet-stream";
+}
+
 void main(){
-	WSADATA wsaData;
-	/*
-		select()»úÖÆÖĞÌá¹©µÄfd_setµÄÊı¾İ½á¹¹£¬Êµ¼ÊÉÏÊÇlongÀàĞÍµÄÊı×é£¬
-		Ã¿Ò»¸öÊı×éÔªËØ¶¼ÄÜÓëÒ»´ò¿ªµÄÎÄ¼ş¾ä±ú£¨²»¹ÜÊÇsocket¾ä±ú£¬»¹ÊÇÆäËûÎÄ¼ş»òÃüÃû¹ÜµÀ»òÉè±¸¾ä±ú£©½¨Á¢ÁªÏµ£¬½¨Á¢ÁªÏµµÄ¹¤×÷ÓÉ³ÌĞòÔ±Íê³É.
-		µ±µ÷ÓÃselect()Ê±£¬ÓÉÄÚºË¸ù¾İIO×´Ì¬ĞŞ¸Äfd_setµÄÄÚÈİ£¬ÓÉ´ËÀ´Í¨ÖªÖ´ĞĞÁËselect()µÄ½ø³ÌÄÄ¸ösocket»òÎÄ¼ş¾ä±ú·¢ÉúÁË¿É¶Á»ò¿ÉĞ´ÊÂ¼ş¡£
-	*/
-	fd_set rfds;				//ÓÃÓÚ¼ì²ésocketÊÇ·ñÓĞÊı¾İµ½À´µÄµÄÎÄ¼şÃèÊö·û£¬ÓÃÓÚsocket·Ç×èÈûÄ£Ê½ÏÂµÈ´ıÍøÂçÊÂ¼şÍ¨Öª£¨ÓĞÊı¾İµ½À´£©
-	fd_set wfds;				//ÓÃÓÚ¼ì²ésocketÊÇ·ñ¿ÉÒÔ·¢ËÍµÄÎÄ¼şÃèÊö·û£¬ÓÃÓÚsocket·Ç×èÈûÄ£Ê½ÏÂµÈ´ıÍøÂçÊÂ¼şÍ¨Öª£¨¿ÉÒÔ·¢ËÍÊı¾İ£©
-	bool first_connetion = true;
+    // 1. è¯»å–é…ç½®ï¼ˆserver.ini ä¸å¯æ‰§è¡Œæ–‡ä»¶åŒç›®å½•ï¼‰
+    char exePath[MAX_PATH]; GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    string exeDir = exePath;
+    size_t pos = exeDir.find_last_of("\\/");
+    if(pos!=string::npos) exeDir = exeDir.substr(0, pos);
+    string iniFile = exeDir + "\\server.ini";
 
-	int nRc = WSAStartup(0x0202,&wsaData);
+    string listenAddr = getIniString(iniFile.c_str(), "server", "address", "0.0.0.0");
+    string portStr     = getIniString(iniFile.c_str(), "server", "port", "5050");
+    string webroot     = getIniString(iniFile.c_str(), "server", "root", exeDir.c_str());
 
-	if(nRc){
-		printf("Winsock  startup failed with error!\n");
-	}
+    cout << "Config: address=" << listenAddr << " port=" << portStr << " root=" << webroot << endl;
 
-	if(wsaData.wVersion != 0x0202){
-		printf("Winsock version is not correct!\n");
-	}
+    // å¦‚æœé…ç½®çš„ webroot ä¸­æ²¡æœ‰ index.htmlï¼Œåˆ™å°è¯•å›é€€åˆ° exe çš„çˆ¶ç›®å½•ï¼ˆå¸¸è§äºåœ¨ Debug ç›®å½•è¿è¡Œ exeï¼‰
+    auto fileExists = [](const string& p)->bool {
+        DWORD attr = GetFileAttributesA(p.c_str());
+        return (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY));
+    };
 
-	printf("Winsock  startup Ok!\n");
+    string testIndex = webroot;
+    if(testIndex.size() && testIndex.back()!='\\' && testIndex.back()!='/') testIndex += "\\";
+    testIndex += "index.html";
+    if (!fileExists(testIndex)) {
+        // å– exeDir çš„çˆ¶ç›®å½•
+        string parent = exeDir;
+        size_t ppos = parent.find_last_of("\\/");
+        if (ppos != string::npos) parent = parent.substr(0, ppos);
+        string parentIndex = parent;
+        if(parentIndex.size() && parentIndex.back()!='\\' && parentIndex.back()!='/') parentIndex += "\\";
+        parentIndex += "index.html";
+        if (fileExists(parentIndex)) {
+            cout << "webroot: index.html not found in configured root, switching webroot to parent: " << parent << endl;
+            webroot = parent;
+        } else {
+            cout << "Warning: index.html not found in configured webroot (" << webroot << ") or its parent (" << parent << ")" << endl;
+        }
+    }
 
+    // 2. Winsock åˆå§‹åŒ–ä¸ socket/create/bind/listen
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0) {
+        cout << "WSAStartup failed\n"; return;
+    }
 
-	//¼àÌısocket
-	SOCKET srvSocket;	
+    SOCKET srvSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (srvSocket == INVALID_SOCKET) { cout << "socket() failed\n"; WSACleanup(); return; }
 
-	//·şÎñÆ÷µØÖ·ºÍ¿Í»§¶ËµØÖ·
-	sockaddr_in addr,clientAddr;
+    // allow reuse
+    BOOL opt = TRUE;
+    setsockopt(srvSocket, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
 
-	//»á»°socket£¬¸ºÔğºÍclient½ø³ÌÍ¨ĞÅ
-	SOCKET sessionSocket;
+    sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((unsigned short)atoi(portStr.c_str()));
+    if(listenAddr == "0.0.0.0" || listenAddr.empty()) {
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    } else {
+        // Parse IPv4 address: on Windows some SDKs may not declare InetPtonA, so fall back to inet_addr.
+        #ifdef _WIN32
+        addr.sin_addr.s_addr = inet_addr(listenAddr.c_str());
+        #else
+        inet_pton(AF_INET, listenAddr.c_str(), &addr.sin_addr);
+        #endif
+    }
 
-	//ipµØÖ·³¤¶È
-	int addrLen;
+    if (bind(srvSocket, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        cout << "bind() failed\n"; closesocket(srvSocket); WSACleanup(); return;
+    }
 
-	//´´½¨¼àÌısocket
-	srvSocket = socket(AF_INET,SOCK_STREAM,0);
-	if(srvSocket != INVALID_SOCKET)
-		printf("Socket create Ok!\n");
+    if (listen(srvSocket, SOMAXCONN) == SOCKET_ERROR) {
+        cout << "listen() failed\n"; closesocket(srvSocket); WSACleanup(); return;
+    }
 
+    cout << "Server listening on " << listenAddr << ":" << portStr << endl;
 
-	//ÉèÖÃ·şÎñÆ÷µÄ¶Ë¿ÚºÍµØÖ·
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(5050);
-	addr.sin_addr.S_un.S_addr = htonl(INADDR_ANY); //Ö÷»úÉÏÈÎÒâÒ»¿éÍø¿¨µÄIPµØÖ·
+    // 3. accept å¾ªç¯å¹¶å¤„ç†ç®€å• HTTP GET
+    while (true) {
+        sockaddr_in clientAddr; int clientLen = sizeof(clientAddr);
+        SOCKET client = accept(srvSocket, (sockaddr*)&clientAddr, &clientLen);
+        if (client == INVALID_SOCKET) {
+            cout << "accept() failed\n"; break;
+        }
 
+                // è·å–å®¢æˆ·ç«¯ IPï¼ˆç”¨äºæ—¥å¿—ï¼‰
+                char clientIpBuf[INET_ADDRSTRLEN] = {0};
+        #ifdef _WIN32
+                const char* tmpIp = inet_ntoa(clientAddr.sin_addr);
+                if (tmpIp) strcpy_s(clientIpBuf, sizeof(clientIpBuf), tmpIp);
+        #else
+                inet_ntop(AF_INET, &clientAddr.sin_addr, clientIpBuf, INET_ADDRSTRLEN);
+        #endif
+                string clientIp = clientIpBuf;
 
-	//binding
-	int rtn = bind(srvSocket,(LPSOCKADDR)&addr,sizeof(addr));
-	if(rtn != SOCKET_ERROR)
-		printf("Socket bind Ok!\n");
+        // æ¥æ”¶è¯·æ±‚ï¼ˆç®€å•å®ç°ï¼šä¸€æ¬¡ recv è¯»å–å…¨éƒ¨è¯·æ±‚è¡Œ/å¤´éƒ¨ï¼‰
+        char buf[8192] = {0};
+        int ret = recv(client, buf, sizeof(buf)-1, 0);
+        if (ret <= 0) { closesocket(client); continue; }
 
-	//¼àÌı
-	rtn = listen(srvSocket,5);
-	if(rtn != SOCKET_ERROR)
-		printf("Socket listen Ok!\n");
+        // è§£æè¯·æ±‚è¡Œï¼š METHOD PATH HTTP/...
+        istringstream reqstream(buf);
+        string method, path, httpver;
+        reqstream >> method >> path >> httpver;
 
-	clientAddr.sin_family =AF_INET;
-	addrLen = sizeof(clientAddr);
+        // æ—¥å¿—ï¼šå®¢æˆ·ç«¯ä¸è¯·æ±‚è¡Œ
+        cout << "[" << clientIp << "] " << method << " " << path << endl;
 
-	//ÉèÖÃ½ÓÊÕ»º³åÇø
-	char recvBuf[4096];
+        // å¥åº·æ£€æŸ¥ç«¯ç‚¹ï¼Œä¾¿äºéªŒè¯æœåŠ¡æ˜¯å¦å¯åŠ¨ä¸é…ç½®
+        if (method == "GET" && (path == "/__health" || path == "/__health/")) {
+            ostringstream oss;
+            oss << "HTTP/1.1 200 OK\r\n";
+            oss << "Content-Type: application/json; charset=utf-8\r\n";
+            string body = "{\"status\":\"ok\",\"address\":\"" + listenAddr + "\",\"port\":\"" + portStr + "\",\"root\":\"" + webroot + "\"}";
+            oss << "Content-Length: " << body.size() << "\r\n";
+            oss << "Connection: close\r\n\r\n";
+            oss << body;
+            string resp = oss.str();
+            send(client, resp.c_str(), (int)resp.size(), 0);
+            closesocket(client);
+            continue;
+        }
 
-	u_long blockMode = 1;//½«srvSockÉèÎª·Ç×èÈûÄ£Ê½ÒÔ¼àÌı¿Í»§Á¬½ÓÇëÇó
+        // ä»…å¤„ç† GET
+        if (method != "GET") {
+            string resp = "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\nMethod Not Allowed";
+            send(client, resp.c_str(), (int)resp.size(), 0);
+            closesocket(client);
+            continue;
+        }
 
-	//µ÷ÓÃioctlsocket£¬½«srvSocket¸ÄÎª·Ç×èÈûÄ£Ê½£¬¸Ä³É·´¸´¼ì²éfd_setÔªËØµÄ×´Ì¬£¬¿´Ã¿¸öÔªËØ¶ÔÓ¦µÄ¾ä±úÊÇ·ñ¿É¶Á»ò¿ÉĞ´
-	if ((rtn = ioctlsocket(srvSocket, FIONBIO, &blockMode) == SOCKET_ERROR)) { //FIONBIO£ºÔÊĞí»ò½ûÖ¹Ì×½Ó¿ÚsµÄ·Ç×èÈûÄ£Ê½¡£
-		cout << "ioctlsocket() failed with error!\n";
-		return;
-	}
-	cout << "ioctlsocket() for server socket ok!	Waiting for client connection and data\n";
+        // è§„èŒƒåŒ–è·¯å¾„
+        if (path == "/") path = "/index.html";
+        // é˜²æ­¢ç›®å½•ç©¿è¶Š
+        while(path.find("..") != string::npos) path.erase(path.find(".."), 2);
 
-	while(true){
-		//Çå¿ÕrfdsºÍwfdsÊı×é
-		FD_ZERO(&rfds);
-		FD_ZERO(&wfds);
+        string fullPath = webroot;
+        if(fullPath.back()!='\\' && fullPath.back()!='/') fullPath += "\\";
+        // æŠŠ / è½¬ä¸º \
+        for(char &c : path) if(c=='/') c='\\';
+        fullPath += (path.size() && (path[0]=='\\' || path[0]=='/') ? path.substr(1) : path);
 
-		//½«srvSocket¼ÓÈërfdsÊı×é
-		//¼´£ºµ±¿Í»§¶ËÁ¬½ÓÇëÇóµ½À´Ê±£¬rfdsÊı×éÀïsrvSocket¶ÔÓ¦µÄµÄ×´Ì¬Îª¿É¶Á
-		//Òò´ËÕâÌõÓï¾äµÄ×÷ÓÃ¾ÍÊÇ£ºÉèÖÃµÈ´ı¿Í»§Á¬½ÓÇëÇó
-		FD_SET(srvSocket, &rfds);
+        // 4. ä»æ–‡ä»¶ç³»ç»Ÿè¯»å–å¹¶æ„å»ºå“åº”
+        ifstream ifs(fullPath, ios::binary);
+        if (!ifs) {
+            string body = "<html><body><h1>404 Not Found</h1></body></html>";
+            ostringstream oss;
+            oss << "HTTP/1.1 404 Not Found\r\n";
+            oss << "Content-Type: text/html; charset=utf-8\r\n";
+            oss << "Content-Length: " << body.size() << "\r\n";
+            oss << "Connection: close\r\n\r\n";
+            oss << body;
+            string resp = oss.str();
+            send(client, resp.c_str(), (int)resp.size(), 0);
+            closesocket(client);
+            continue;
+        }
 
-		//Èç¹ûfirst_connetionÎªtrue£¬sessionSocket»¹Ã»ÓĞ²úÉú
-		if (!first_connetion) {
-			//½«sessionSocket¼ÓÈërfdsÊı×éºÍwfdsÊı×é
-			//¼´£ºµ±¿Í»§¶Ë·¢ËÍÊı¾İ¹ıÀ´Ê±£¬rfdsÊı×éÀïsessionSocketµÄ¶ÔÓ¦µÄ×´Ì¬Îª¿É¶Á£»µ±¿ÉÒÔ·¢ËÍÊı¾İµ½¿Í»§¶ËÊ±£¬wfdsÊı×éÀïsessionSocketµÄ¶ÔÓ¦µÄ×´Ì¬Îª¿ÉĞ´
-			//Òò´ËÏÂÃæ¶şÌõÓï¾äµÄ×÷ÓÃ¾ÍÊÇ£º
-			//ÉèÖÃµÈ´ı»á»°SOKCET¿É½ÓÊÜÊı¾İ»ò¿É·¢ËÍÊı¾İ
-			if (sessionSocket != INVALID_SOCKET) { //Èç¹ûsessionSocketÊÇÓĞĞ§µÄ
-				FD_SET(sessionSocket, &rfds);
-				FD_SET(sessionSocket, &wfds);
-			}
-			
-		}
-		
-		/*
-			select¹¤×÷Ô­Àí£º´«ÈëÒª¼àÌıµÄÎÄ¼şÃèÊö·û¼¯ºÏ£¨¿É¶Á¡¢¿ÉĞ´£¬ÓĞÒì³££©¿ªÊ¼¼àÌı£¬select´¦ÓÚ×èÈû×´Ì¬¡£
-			µ±ÓĞ¿É¶ÁĞ´ÊÂ¼ş·¢Éú»òÉèÖÃµÄµÈ´ıÊ±¼ätimeoutµ½ÁË¾Í»á·µ»Ø£¬·µ»ØÖ®Ç°×Ô¶¯È¥³ı¼¯ºÏÖĞÎŞÊÂ¼ş·¢ÉúµÄÎÄ¼şÃèÊö·û£¬·µ»ØÊ±´«³öÓĞÊÂ¼ş·¢ÉúµÄÎÄ¼şÃèÊö·û¼¯ºÏ¡£
-			µ«select´«³öµÄ¼¯ºÏ²¢Ã»ÓĞ¸æËßÓÃ»§¼¯ºÏÖĞ°üÀ¨ÄÄ¼¸¸ö¾ÍĞ÷µÄÎÄ¼şÃèÊö·û£¬ĞèÒªÓÃ»§ºóĞø½øĞĞ±éÀú²Ù×÷(Í¨¹ıFD_ISSET¼ì²éÃ¿¸ö¾ä±úµÄ×´Ì¬)¡£
-		*/
-		//¿ªÊ¼µÈ´ı£¬µÈ´ırfdsÀïÊÇ·ñÓĞÊäÈëÊÂ¼ş£¬wfdsÀïÊÇ·ñÓĞ¿ÉĞ´ÊÂ¼ş
-		//The select function returns the total number of socket handles that are ready and contained in the fd_set structure
-		//·µ»Ø×Ü¹²¿ÉÒÔ¶Á»òĞ´µÄ¾ä±ú¸öÊı
-		int nTotal = select(0, &rfds, &wfds, NULL, NULL);
+        // è¯»å–æ–‡ä»¶å†…å®¹
+        ifs.seekg(0, ios::end);
+        size_t fsize = ifs.tellg();
+        ifs.seekg(0, ios::beg);
+        string content;
+        content.resize(fsize);
+        ifs.read(&content[0], fsize);
 
-		//Èç¹ûsrvSockÊÕµ½Á¬½ÓÇëÇó£¬½ÓÊÜ¿Í»§Á¬½ÓÇëÇó
-		if (FD_ISSET(srvSocket, &rfds)) {
-			nTotal--;   //ÒòÎª¿Í»§¶ËÇëÇóµ½À´Ò²Ëã¿É¶ÁÊÂ¼ş£¬Òò´Ë-1£¬Ê£ÏÂµÄ¾ÍÊÇÕæÕıÓĞ¿É¶ÁÊÂ¼şµÄ¾ä±ú¸öÊı£¨¼´ÓĞ¶àÉÙ¸ösocketÊÕµ½ÁËÊı¾İ£©
+        // æ—¥å¿—ï¼šè¿”å›æ–‡ä»¶å’Œå¤§å°
+        cout << "[" << clientIp << "] Serving file: " << fullPath << " (" << fsize << " bytes)" << endl;
 
-			//²úÉú»á»°SOCKET
-			sessionSocket = accept(srvSocket, (LPSOCKADDR)&clientAddr, &addrLen);
-			if (sessionSocket != INVALID_SOCKET)
-				printf("Socket listen one client request!\n");
+        // æ„é€ å“åº”å¤´å¹¶å‘é€ï¼ˆå¤´ + äºŒè¿›åˆ¶å†…å®¹ï¼‰
+        string ctype = contentTypeByExt(fullPath);
+        ostringstream header;
+        header << "HTTP/1.1 200 OK\r\n";
+        header << "Content-Type: " << ctype << "\r\n";
+        header << "Content-Length: " << fsize << "\r\n";
+        header << "Connection: close\r\n\r\n";
+        string hdr = header.str();
+        send(client, hdr.c_str(), (int)hdr.size(), 0);
 
-			//°Ñ»á»°SOCKETÉèÎª·Ç×èÈûÄ£Ê½
-			if ((rtn = ioctlsocket(sessionSocket, FIONBIO, &blockMode) == SOCKET_ERROR)) { //FIONBIO£ºÔÊĞí»ò½ûÖ¹Ì×½Ó¿ÚsµÄ·Ç×èÈûÄ£Ê½¡£
-				cout << "ioctlsocket() failed with error!\n";
-				return;
-			}
-			cout << "ioctlsocket() for session socket ok!	Waiting for client connection and data\n";
+        // send body (å¯èƒ½è¾ƒå¤§æ—¶éœ€è¦å¾ªç¯å‘é€ï¼Œè¿™é‡Œç®€å•ä¸€æ¬¡æ€§å‘é€)
+        size_t sent = 0;
+        while (sent < content.size()) {
+            int s = send(client, content.data() + sent, (int)min<size_t>(8192, content.size()-sent), 0);
+            if (s == SOCKET_ERROR) break;
+            sent += s;
+        }
 
-			//ÉèÖÃµÈ´ı»á»°SOKCET¿É½ÓÊÜÊı¾İ»ò¿É·¢ËÍÊı¾İ
-			FD_SET(sessionSocket, &rfds);
-			FD_SET(sessionSocket, &wfds);
+        closesocket(client);
+    }
 
-			first_connetion = false;
-
-		}
-
-		//¼ì²é»á»°SOCKETÊÇ·ñÓĞÊı¾İµ½À´»òÕßÊÇ·ñ¿ÉÒÔ·¢ËÍÊı¾İ
-		if (nTotal > 0) { 
-			//Èç¹û»¹ÓĞÓĞ¿É¶ÁÊÂ¼ş£¬ËµÃ÷ÊÇ»á»°socketÓĞÊı¾İµ½À´£¬Ôò½ÓÊÜ¿Í»§µÄÊı¾İ
-			if (FD_ISSET(sessionSocket, &rfds)) {
-				//receiving data from client
-				memset(recvBuf, '\0', 4096);
-				rtn = recv(sessionSocket, recvBuf, 256, 0);
-				if (rtn > 0) {
-					printf("Received %d bytes from client: %s\n", rtn, recvBuf);
-				}
-				else { //·ñÔòÊÇÊÕµ½ÁË¿Í»§¶Ë¶Ï¿ªÁ¬½ÓµÄÇëÇó£¬Ò²Ëã¿É¶ÁÊÂ¼ş¡£µ«rtn = 0
-					printf("Client leaving ...\n");
-					closesocket(sessionSocket);  //¼ÈÈ»clientÀë¿ªÁË£¬¾Í¹Ø±ÕsessionSocket
-					nTotal--;	//ÒòÎª¿Í»§¶ËÀë¿ªÒ²ÊôÓÚ¿É¶ÁÊÂ¼ş£¬ËùÒÔĞèÒª-1
-					sessionSocket = INVALID_SOCKET; //°ÑsessionSocketÉèÎªINVALID_SOCKET
-				}
-			}
-		}	
-	}
-
+    closesocket(srvSocket);
+    WSACleanup();
 }
