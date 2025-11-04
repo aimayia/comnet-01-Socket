@@ -1,10 +1,163 @@
-<html>
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-	<title>CS_Net_Lab_1</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CN_mode1</title>
+    <link rel="icon" href="book.ico" type="image/x-icon">
+    <style>
+        body {
+            font-family: Arial, "Microsoft YaHei", sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        
+        .section {
+            margin: 30px 0;
+        }
+        
+        .section h2 {
+            color: #555;
+            margin-bottom: 15px;
+        }
+        
+        .images {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin: 20px 0;
+        }
+        
+        .image-container {
+            border: 2px solid #ddd;
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #fafafa;
+        }
+        
+        .image-container img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        .image-caption {
+            text-align: center;
+            margin-top: 8px;
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .text-file {
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        
+        .text-file h3 {
+            margin-top: 0;
+            color: #444;
+        }
+        
+        .text-content {
+            background-color: white;
+            padding: 15px;
+            border-left: 4px solid #4CAF50;
+            font-family: "Courier New", monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .download-link {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        
+        .download-link:hover {
+            background-color: #45a049;
+        }
+    </style>
 </head>
 <body>
-	<p>hello world </p>
-	<img src="hust.jpg" >
-	<img src="部分真值表.png" >
+    <div class="container">
+        <h1>CN_mode1</h1>
+
+        <div class="section">
+            <p style="font-size: 18px; color: #555;">Hello World!</p>
+        </div>
+        
+        <div class="section">
+            <h2>📷 图片展示</h2>
+            <div class="images">
+                <div class="image-container">
+                    <img src="hust.jpg" alt="HUST Logo">
+                    <div class="image-caption">hust.jpg</div>
+                </div>
+                <div class="image-container">
+                    <img src="TruthTable.png" alt="Truth Table">
+                    <div class="image-caption">TruthTable.png</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>📄 文本文件</h2>
+            <div class="text-file">
+                <h3>ex.txt 内容预览</h3>
+                <div class="text-content" id="textContent">
+                    加载中...
+                </div>
+                <a href="ex.txt" class="download-link" download>📥 下载 ex.txt</a>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>🔗 资源链接</h2>
+            <ul style="line-height: 2;">
+                <li><a href="book.ico">book.ico (网站图标)</a></li>
+                <li><a href="hust.jpg">hust.jpg</a></li>
+                <li><a href="TruthTable.png">TruthTable.png</a></li>
+                <li><a href="ex.txt">ex.txt</a></li>
+            </ul>
+        </div>
+    </div>
+    
+    <script>
+        // 加载并显示 ex.txt 的内容
+        fetch('ex.txt')
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById('textContent').textContent = data;
+            })
+            .catch(error => {
+                document.getElementById('textContent').textContent = '无法加载文件内容';
+                console.error('Error loading ex.txt:', error);
+            });
+    </script>
 </body>
 </html>
